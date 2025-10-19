@@ -22,14 +22,31 @@ import storage_handler
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "change-me")
 app.config["UPLOAD_FOLDER"] = os.path.join(os.path.dirname(__file__), "uploads")
+app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10MB max file size
 
 ALLOWED_EXTENSIONS = {"pdf"}
-os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
+
+# Create uploads directory with error handling
+try:
+    os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
+except Exception as e:
+    print(f"Warning: Could not create uploads directory: {e}")
+    print("File uploads will use cloud storage if configured.")
 
 
 def allowed_file(filename: str) -> bool:
     """Returns True when the file extension is part of the allowed list."""
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+@app.route('/health')
+def health_check():
+    """Health check endpoint for Railway and monitoring."""
+    return jsonify({
+        "status": "healthy",
+        "service": "invoice-management-system",
+        "backend": database.current_backend()
+    }), 200
 
 
 @app.route('/')
