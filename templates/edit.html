@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Invoice{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-md-10">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <h1 class="h3 mb-1"><i class="fas fa-edit me-2"></i>Edit Invoice</h1>
+                    <p class="text-muted mb-0">Update invoice details and information</p>
+                </div>
+                <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">
+                    <i class="fas fa-arrow-left me-2"></i>Back
+                </a>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="mb-0"><i class="fas fa-file-invoice me-2"></i>Invoice Information</h3>
+                </div>
+                <form method="post">
+                    <div class="card-body">
+                        {% if invoice.pdf_path %}
+                        <div class="alert alert-info mb-4" style="border-left: 4px solid var(--info-color);">
+                            <div class="d-flex align-items-center">
+                                <i class="fas fa-file-pdf me-3" style="font-size: 2rem; color: var(--info-color);"></i>
+                                <div class="flex-grow-1">
+                                    <strong>Current PDF File</strong>
+                                    <p class="mb-2 mt-1">A PDF file is attached to this invoice</p>
+                                    <a href="{{ url_for('download_invoice', filename=invoice.pdf_path) }}" class="btn btn-sm btn-outline-primary" target="_blank">
+                                        <i class="fas fa-eye me-2"></i>View PDF
+                                    </a>
+                                </div>
+                            </div>
+                            <small class="text-muted d-block mt-3">
+                                <i class="fas fa-info-circle me-1"></i>
+                                Note: You cannot change the PDF file when editing. To change the file, please delete this invoice and create a new one.
+                            </small>
+                        </div>
+                        {% endif %}
+
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label for="invoiceDate" class="form-label"><i class="fas fa-calendar me-2"></i>Invoice Date</label>
+                                <input type="date" class="form-control" id="invoiceDate" name="invoiceDate" value="{{ invoice.invoice_date }}" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="invoiceNumber" class="form-label"><i class="fas fa-hashtag me-2"></i>Invoice Number</label>
+                                <input type="text" class="form-control" id="invoiceNumber" name="invoiceNumber" value="{{ invoice.invoice_number }}" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="companyName" class="form-label"><i class="fas fa-building me-2"></i>Company Name</label>
+                                <input type="text" class="form-control" id="companyName" name="companyName" value="{{ invoice.company_name }}" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="totalAmount" class="form-label"><i class="fas fa-dollar-sign me-2"></i>Total Amount</label>
+                                <input type="text" class="form-control" id="totalAmount" name="totalAmount" value="{{ invoice.total_amount }}" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="enteredBy" class="form-label"><i class="fas fa-user me-2"></i>Entered By</label>
+                                <input type="text" class="form-control" id="enteredBy" name="enteredBy" value="{{ invoice.entered_by }}" required>
+                            </div>
+                            <div class="col-md-12">
+                                <label for="notes" class="form-label"><i class="fas fa-sticky-note me-2"></i>Notes (Optional)</label>
+                                <textarea class="form-control" id="notes" name="notes" rows="3" placeholder="Add any additional notes here...">{{ invoice.notes or '' }}</textarea>
+                            </div>
+                        </div>
+
+                        <div class="d-flex justify-content-end gap-2 mt-4">
+                            <a href="{{ url_for('index') }}" class="btn btn-secondary">
+                                <i class="fas fa-times me-2"></i>Cancel
+                            </a>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save me-2"></i>Update Invoice
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

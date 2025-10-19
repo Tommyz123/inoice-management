@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}Upload Invoice{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="row justify-content-center">
+        <div class="col-md-10">
+            <div class="d-flex justify-content-between align-items-center mb-4">
+                <div>
+                    <h1 class="h3 mb-1"><i class="fas fa-file-upload me-2"></i>Upload New Invoice</h1>
+                    <p class="text-muted mb-0">Upload a PDF file and let AI extract the details</p>
+                </div>
+                <a href="{{ url_for('index') }}" class="btn btn-outline-secondary">
+                    <i class="fas fa-arrow-left me-2"></i>Back
+                </a>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h3 class="mb-0"><i class="fas fa-cloud-upload-alt me-2"></i>PDF Upload</h3>
+                </div>
+                <form method="post" enctype="multipart/form-data">
+                    <div class="card-body">
+                        <div class="upload-zone text-center mb-4 p-5" style="border: 3px dashed var(--primary-color); border-radius: 16px; background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%); transition: all 0.3s ease;">
+                            <i class="fas fa-file-pdf" style="font-size: 4rem; color: var(--primary-color); margin-bottom: 1rem;"></i>
+                            <p class="mb-3" style="font-size: 1.1rem; font-weight: 600;">Drag and drop a PDF file here or click to select</p>
+                            <input type="file" class="form-control" id="invoiceFile" name="invoiceFile" accept="application/pdf">
+                            <small class="text-muted">Maximum file size: 10MB</small>
+                        </div>
+                        <div id="ocr-status" class="alert alert-info d-none" role="alert"></div>
+
+                        <div class="divider my-4" style="border-top: 2px solid var(--border-color); position: relative;">
+                            <span style="position: absolute; top: -12px; left: 50%; transform: translateX(-50%); background: white; padding: 0 1rem; font-weight: 600; color: var(--text-secondary);">Invoice Details</span>
+                        </div>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label for="invoiceDate" class="form-label"><i class="fas fa-calendar me-2"></i>Invoice Date</label>
+                                <input type="date" class="form-control" id="invoiceDate" name="invoiceDate" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="invoiceNumber" class="form-label"><i class="fas fa-hashtag me-2"></i>Invoice Number</label>
+                                <input type="text" class="form-control" id="invoiceNumber" name="invoiceNumber" placeholder="INV-2024-001" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="companyName" class="form-label"><i class="fas fa-building me-2"></i>Company Name</label>
+                                <input type="text" class="form-control" id="companyName" name="companyName" placeholder="Acme Corporation" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="totalAmount" class="form-label"><i class="fas fa-dollar-sign me-2"></i>Total Amount</label>
+                                <input type="text" class="form-control" id="totalAmount" name="totalAmount" placeholder="1234.56" required>
+                            </div>
+                            <div class="col-md-6">
+                                <label for="enteredBy" class="form-label"><i class="fas fa-user me-2"></i>Entered By</label>
+                                <input type="text" class="form-control" id="enteredBy" name="enteredBy" placeholder="John Doe" required>
+                            </div>
+                            <div class="col-md-12">
+                                <label for="notes" class="form-label"><i class="fas fa-sticky-note me-2"></i>Notes (Optional)</label>
+                                <textarea class="form-control" id="notes" name="notes" rows="3" placeholder="Add any additional notes here..."></textarea>
+                            </div>
+                        </div>
+
+                        <div class="d-flex justify-content-end gap-2 mt-4">
+                            <a href="{{ url_for('index') }}" class="btn btn-secondary">
+                                <i class="fas fa-times me-2"></i>Cancel
+                            </a>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-save me-2"></i>Save Invoice
+                            </button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
