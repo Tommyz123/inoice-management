@@ -39,6 +39,28 @@ def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+def format_date_english(date_string):
+    """Format date string to English format (e.g., 'November 5, 2025')."""
+    if not date_string:
+        return ""
+    try:
+        # Try to parse various date formats
+        for fmt in ["%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%Y/%m/%d"]:
+            try:
+                date_obj = datetime.strptime(date_string, fmt)
+                return date_obj.strftime("%B %d, %Y")
+            except ValueError:
+                continue
+        # If no format matched, return original
+        return date_string
+    except Exception:
+        return date_string
+
+
+# Register custom Jinja2 filter
+app.jinja_env.filters['format_date'] = format_date_english
+
+
 @app.route('/health')
 def health_check():
     """Health check endpoint for Railway and monitoring."""

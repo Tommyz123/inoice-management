@@ -66,7 +66,7 @@
                 {% if invoices %}
                     {% for invoice in invoices %}
                         <tr>
-                            <td>{{ invoice.invoice_date }}</td>
+                            <td>{{ invoice.invoice_date|format_date }}</td>
                             <td>{{ invoice.invoice_number }}</td>
                             <td>{{ invoice.company_name }}</td>
                             <td class="text-end">${{ "{:,.2f}".format(invoice.total_amount) }}</td>
@@ -76,7 +76,7 @@
                                         <i class="fas fa-check-circle me-1"></i>Paid
                                     </span>
                                     {% if invoice.payment_date %}
-                                        <small class="text-muted d-block mt-1">{{ invoice.payment_date }}</small>
+                                        <small class="text-muted d-block mt-1">{{ invoice.payment_date|format_date }}</small>
                                     {% endif %}
                                 {% else %}
                                     <span class="badge bg-warning text-dark">

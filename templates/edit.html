@@ -94,7 +94,7 @@
                                 <div class="flex-grow-1">
                                     <strong>Invoice Marked as PAID</strong>
                                     {% if invoice.payment_date %}
-                                        <p class="mb-0 mt-1">Payment Date: {{ invoice.payment_date }}</p>
+                                        <p class="mb-0 mt-1">Payment Date: {{ invoice.payment_date|format_date }}</p>
                                     {% endif %}
                                 </div>
                             </div>
