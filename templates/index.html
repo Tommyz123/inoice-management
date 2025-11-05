@@ -57,6 +57,7 @@
                     <th scope="col">Invoice #</th>
                     <th scope="col">Company</th>
                     <th scope="col" class="text-end">Amount</th>
+                    <th scope="col">Payment Status</th>
                     <th scope="col">Entered By</th>
                     <th scope="col">Actions</th>
                 </tr>
@@ -69,12 +70,31 @@
                             <td>{{ invoice.invoice_number }}</td>
                             <td>{{ invoice.company_name }}</td>
                             <td class="text-end">${{ "{:,.2f}".format(invoice.total_amount) }}</td>
+                            <td>
+                                {% if invoice.payment_status == 'paid' %}
+                                    <span class="badge bg-success">
+                                        <i class="fas fa-check-circle me-1"></i>Paid
+                                    </span>
+                                    {% if invoice.payment_date %}
+                                        <small class="text-muted d-block mt-1">{{ invoice.payment_date }}</small>
+                                    {% endif %}
+                                {% else %}
+                                    <span class="badge bg-warning text-dark">
+                                        <i class="fas fa-clock me-1"></i>Unpaid
+                                    </span>
+                                {% endif %}
+                            </td>
                             <td>{{ invoice.entered_by }}</td>
                             <td>
                                 <div class="btn-group" role="group">
                                     {% if invoice.pdf_path %}
-                                        <a href="{{ url_for('download_invoice', filename=invoice.pdf_path) }}" class="btn btn-sm btn-outline-primary" target="_blank" title="View PDF">
-                                            <i class="fas fa-file-pdf"></i>
+                                        <a href="{{ url_for('download_invoice', filename=invoice.pdf_path) }}" class="btn btn-sm btn-outline-primary" target="_blank" title="View Invoice PDF">
+                                            <i class="fas fa-file-invoice"></i>
+                                        </a>
+                                    {% endif %}
+                                    {% if invoice.payment_proof_path %}
+                                        <a href="{{ url_for('download_payment_proof', filename=invoice.payment_proof_path) }}" class="btn btn-sm btn-outline-success" target="_blank" title="View Payment Proof">
+                                            <i class="fas fa-receipt"></i>
                                         </a>
                                     {% endif %}
                                     <a href="{{ url_for('edit_invoice', invoice_id=invoice.id) }}" class="btn btn-sm btn-outline-secondary" title="Edit Invoice">
@@ -91,7 +111,7 @@
                     {% endfor %}
                 {% else %}
                     <tr>
-                        <td colspan="6" class="text-center text-muted py-4">No invoices found. Try adjusting your filters or upload a new invoice.</td>
+                        <td colspan="7" class="text-center text-muted py-4">No invoices found. Try adjusting your filters or upload a new invoice.</td>
                     </tr>
                 {% endif %}
             </tbody>

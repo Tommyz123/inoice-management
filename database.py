@@ -22,6 +22,9 @@ class Invoice(Base):
     entered_by = Column(String(128), nullable=False)
     notes = Column(Text, nullable=True)
     pdf_path = Column(String(512), nullable=True)
+    payment_status = Column(String(32), nullable=False, default="unpaid")
+    payment_proof_path = Column(String(512), nullable=True)
+    payment_date = Column(String(32), nullable=True)
 
 
 def _determine_backend() -> str:
@@ -72,6 +75,9 @@ class SQLiteBackend:
             entered_by=data.get("entered_by"),
             notes=data.get("notes"),
             pdf_path=data.get("pdf_path"),
+            payment_status=data.get("payment_status", "unpaid"),
+            payment_proof_path=data.get("payment_proof_path"),
+            payment_date=data.get("payment_date"),
         )
         with self.session() as session:
             session.add(invoice)
@@ -132,6 +138,9 @@ class SQLiteBackend:
             "entered_by": invoice.entered_by,
             "notes": invoice.notes,
             "pdf_path": invoice.pdf_path,
+            "payment_status": invoice.payment_status,
+            "payment_proof_path": invoice.payment_proof_path,
+            "payment_date": invoice.payment_date,
         }
 
 
@@ -221,6 +230,9 @@ class SupabaseBackend:
             entered_by text not null,
             notes text,
             pdf_path text,
+            payment_status text default 'unpaid' not null,
+            payment_proof_path text,
+            payment_date text,
             inserted_at timestamp with time zone default now()
         );
         """
