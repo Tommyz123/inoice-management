@@ -340,39 +340,42 @@ def upload_payment_proof(invoice_id: int):
         flash("Payment date is required.", 'danger')
         return redirect(url_for('edit_invoice', invoice_id=invoice_id))
 
-    if not payment_file or not payment_file.filename:
-        flash("Payment proof PDF is required.", 'danger')
-        return redirect(url_for('edit_invoice', invoice_id=invoice_id))
-
-    if not allowed_file(payment_file.filename):
-        flash("Only PDF files are supported for payment proof.", 'danger')
-        return redirect(url_for('edit_invoice', invoice_id=invoice_id))
-
-    # Upload payment proof file
+    # Upload payment proof file (optional)
     stored_filename = None
+
+    # Only process file if one was uploaded
+    if payment_file and payment_file.filename:
+        if not allowed_file(payment_file.filename):
+            flash("Only PDF files are supported for payment proof.", 'danger')
+            return redirect(url_for('edit_invoice', invoice_id=invoice_id))
+
+        try:
+            if storage_handler.should_use_storage():
+                # Upload to Supabase Storage
+                file_data = payment_file.read()
+                filename = secure_filename(payment_file.filename)
+                # Add prefix to distinguish payment proofs from invoices
+                payment_filename = f"payment_{filename}"
+                storage_path, error = storage_handler.upload_file(file_data, payment_filename)
+
+                if error:
+                    flash(f"Failed to upload payment proof to cloud storage: {error}", 'danger')
+                    return redirect(url_for('edit_invoice', invoice_id=invoice_id))
+
+                stored_filename = storage_path
+            else:
+                # Fallback to local storage
+                timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+                filename = secure_filename(payment_file.filename)
+                stored_filename = f"payment_{timestamp}_{filename}"
+                file_path = os.path.join(app.config["UPLOAD_FOLDER"], stored_filename)
+                payment_file.save(file_path)
+        except Exception as exc:
+            flash(f"Error uploading payment proof: {exc}", 'danger')
+            return redirect(url_for('edit_invoice', invoice_id=invoice_id))
+
+    # Update invoice with payment information
     try:
-        if storage_handler.should_use_storage():
-            # Upload to Supabase Storage
-            file_data = payment_file.read()
-            filename = secure_filename(payment_file.filename)
-            # Add prefix to distinguish payment proofs from invoices
-            payment_filename = f"payment_{filename}"
-            storage_path, error = storage_handler.upload_file(file_data, payment_filename)
-
-            if error:
-                flash(f"Failed to upload payment proof to cloud storage: {error}", 'danger')
-                return redirect(url_for('edit_invoice', invoice_id=invoice_id))
-
-            stored_filename = storage_path
-        else:
-            # Fallback to local storage
-            timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-            filename = secure_filename(payment_file.filename)
-            stored_filename = f"payment_{timestamp}_{filename}"
-            file_path = os.path.join(app.config["UPLOAD_FOLDER"], stored_filename)
-            payment_file.save(file_path)
-
-        # Update invoice with payment information
         update_data = {
             "payment_status": "paid",
             "payment_proof_path": stored_filename,
@@ -381,12 +384,15 @@ def upload_payment_proof(invoice_id: int):
 
         result = database.update_invoice(invoice_id, update_data)
         if result:
-            flash("Payment proof uploaded successfully. Invoice marked as paid.", 'success')
+            if stored_filename:
+                flash("Payment proof uploaded successfully. Invoice marked as paid.", 'success')
+            else:
+                flash("Invoice marked as paid.", 'success')
         else:
             flash("Invoice not found.", 'danger')
 
     except Exception as exc:
-        flash(f"Error uploading payment proof: {exc}", 'danger')
+        flash(f"Error updating invoice: {exc}", 'danger')
 
     return redirect(url_for('edit_invoice', invoice_id=invoice_id))
 
