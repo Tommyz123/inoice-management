@@ -137,4 +137,71 @@ document.addEventListener("DOMContentLoaded", () => {
       console.error(error);
     }
   });
+
+  // Initialize Flatpickr for all date inputs with English format
+  const dateInputs = document.querySelectorAll('input[type="date"]');
+  dateInputs.forEach(input => {
+    flatpickr(input, {
+      dateFormat: "Y-m-d",
+      altInput: true,
+      altFormat: "F j, Y", // English format: "November 5, 2025"
+      locale: "en",
+      allowInput: true,
+    });
+  });
+
+  // Customize file input buttons to show English text
+  const fileInputs = document.querySelectorAll('input[type="file"]');
+  fileInputs.forEach(fileInput => {
+    // Create wrapper for custom button
+    const wrapper = document.createElement('div');
+    wrapper.className = 'custom-file-input-wrapper position-relative';
+
+    // Create custom button
+    const customButton = document.createElement('button');
+    customButton.type = 'button';
+    customButton.className = 'btn btn-outline-primary w-100';
+    customButton.innerHTML = '<i class="fas fa-upload me-2"></i>Choose File';
+
+    // Create filename display
+    const filenameDisplay = document.createElement('div');
+    filenameDisplay.className = 'mt-2 text-muted small';
+    filenameDisplay.textContent = 'No file selected';
+
+    // Hide original input
+    fileInput.style.position = 'absolute';
+    fileInput.style.opacity = '0';
+    fileInput.style.width = '100%';
+    fileInput.style.height = '100%';
+    fileInput.style.top = '0';
+    fileInput.style.left = '0';
+    fileInput.style.cursor = 'pointer';
+
+    // Insert custom button before input
+    fileInput.parentNode.insertBefore(wrapper, fileInput);
+    wrapper.appendChild(customButton);
+    wrapper.appendChild(fileInput);
+    wrapper.appendChild(filenameDisplay);
+
+    // Update display when file is selected
+    fileInput.addEventListener('change', function() {
+      if (this.files && this.files.length > 0) {
+        const fileName = this.files[0].name;
+        filenameDisplay.textContent = `Selected: ${fileName}`;
+        filenameDisplay.className = 'mt-2 text-success small';
+        customButton.innerHTML = `<i class="fas fa-check-circle me-2"></i>${fileName}`;
+        customButton.className = 'btn btn-success w-100';
+      } else {
+        filenameDisplay.textContent = 'No file selected';
+        filenameDisplay.className = 'mt-2 text-muted small';
+        customButton.innerHTML = '<i class="fas fa-upload me-2"></i>Choose File';
+        customButton.className = 'btn btn-outline-primary w-100';
+      }
+    });
+
+    // Trigger file input when custom button is clicked
+    customButton.addEventListener('click', () => {
+      fileInput.click();
+    });
+  });
 });

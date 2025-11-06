@@ -79,6 +79,85 @@
                     </div>
                 </form>
             </div>
+
+            <!-- Payment Information Section -->
+            <div class="card mt-4">
+                <div class="card-header">
+                    <h3 class="mb-0"><i class="fas fa-receipt me-2"></i>Payment Information</h3>
+                </div>
+                <div class="card-body">
+                    {% if invoice.payment_status == 'paid' %}
+                        <!-- Paid Invoice Display -->
+                        <div class="alert alert-success mb-4" style="border-left: 4px solid var(--success-color);">
+                            <div class="d-flex align-items-center">
+                                <i class="fas fa-check-circle me-3" style="font-size: 2rem; color: var(--success-color);"></i>
+                                <div class="flex-grow-1">
+                                    <strong>Invoice Marked as PAID</strong>
+                                    {% if invoice.payment_date %}
+                                        <p class="mb-0 mt-1">Payment Date: {{ invoice.payment_date|format_date }}</p>
+                                    {% endif %}
+                                </div>
+                            </div>
+                        </div>
+
+                        {% if invoice.payment_proof_path %}
+                        <div class="mb-3">
+                            <label class="form-label"><i class="fas fa-file-pdf me-2"></i>Payment Proof</label>
+                            <div>
+                                <a href="{{ url_for('download_payment_proof', filename=invoice.payment_proof_path) }}"
+                                   class="btn btn-outline-success" target="_blank">
+                                    <i class="fas fa-eye me-2"></i>View Payment Proof PDF
+                                </a>
+                            </div>
+                        </div>
+                        {% endif %}
+
+                        <hr>
+
+                        <!-- Mark as Unpaid Form -->
+                        <form method="post" action="{{ url_for('mark_unpaid', invoice_id=invoice.id) }}"
+                              onsubmit="return confirm('Are you sure you want to mark this invoice as unpaid? This will remove the payment proof.');">
+                            <button type="submit" class="btn btn-warning">
+                                <i class="fas fa-undo me-2"></i>Mark as Unpaid
+                            </button>
+                        </form>
+
+                    {% else %}
+                        <!-- Unpaid Invoice - Upload Payment Proof -->
+                        <div class="alert alert-warning mb-4" style="border-left: 4px solid var(--warning-color);">
+                            <div class="d-flex align-items-center">
+                                <i class="fas fa-clock me-3" style="font-size: 2rem; color: var(--warning-color);"></i>
+                                <div>
+                                    <strong>Invoice Status: UNPAID</strong>
+                                    <p class="mb-0 mt-1">Upload payment proof to mark this invoice as paid</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <form method="post" action="{{ url_for('upload_payment_proof', invoice_id=invoice.id) }}" enctype="multipart/form-data">
+                            <div class="row g-3">
+                                <div class="col-md-6">
+                                    <label for="paymentDate" class="form-label"><i class="fas fa-calendar-check me-2"></i>Payment Date <span class="text-danger">*</span></label>
+                                    <input type="date" class="form-control" id="paymentDate" name="paymentDate" required>
+                                </div>
+                                <div class="col-md-12">
+                                    <label for="paymentFile" class="form-label"><i class="fas fa-file-upload me-2"></i>Payment Proof PDF <span class="text-muted">(Optional)</span></label>
+                                    <input type="file" class="form-control" id="paymentFile" name="paymentFile" accept=".pdf">
+                                    <small class="form-text text-muted">
+                                        <i class="fas fa-info-circle me-1"></i>
+                                        Optional: Upload a PDF file of the payment receipt, bank transfer confirmation, or other payment proof. You can mark as paid without uploading a file.
+                                    </small>
+                                </div>
+                            </div>
+                            <div class="mt-3">
+                                <button type="submit" class="btn btn-success">
+                                    <i class="fas fa-check-circle me-2"></i>Mark as Paid
+                                </button>
+                            </div>
+                        </form>
+                    {% endif %}
+                </div>
+            </div>
         </div>
     </div>
 </div>

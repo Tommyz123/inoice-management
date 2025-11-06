@@ -39,6 +39,28 @@ def allowed_file(filename: str) -> bool:
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
+def format_date_english(date_string):
+    """Format date string to English format (e.g., 'November 5, 2025')."""
+    if not date_string:
+        return ""
+    try:
+        # Try to parse various date formats
+        for fmt in ["%Y-%m-%d", "%d/%m/%Y", "%m/%d/%Y", "%Y/%m/%d"]:
+            try:
+                date_obj = datetime.strptime(date_string, fmt)
+                return date_obj.strftime("%B %d, %Y")
+            except ValueError:
+                continue
+        # If no format matched, return original
+        return date_string
+    except Exception:
+        return date_string
+
+
+# Register custom Jinja2 filter
+app.jinja_env.filters['format_date'] = format_date_english
+
+
 @app.route('/health')
 def health_check():
     """Health check endpoint for Railway and monitoring."""
@@ -329,6 +351,135 @@ def delete_invoice(invoice_id: int):
 @app.route('/stats')
 def stats():
     return render_template('stats.html')
+
+@app.route('/upload_payment/<int:invoice_id>', methods=['POST'])
+def upload_payment_proof(invoice_id: int):
+    """Upload payment proof PDF for an invoice and mark it as paid."""
+    payment_date = request.form.get('paymentDate')
+    payment_file = request.files.get('paymentFile')
+
+    if not payment_date:
+        flash("Payment date is required.", 'danger')
+        return redirect(url_for('edit_invoice', invoice_id=invoice_id))
+
+    # Upload payment proof file (optional)
+    stored_filename = None
+
+    # Only process file if one was uploaded
+    if payment_file and payment_file.filename:
+        if not allowed_file(payment_file.filename):
+            flash("Only PDF files are supported for payment proof.", 'danger')
+            return redirect(url_for('edit_invoice', invoice_id=invoice_id))
+
+        try:
+            if storage_handler.should_use_storage():
+                # Upload to Supabase Storage
+                file_data = payment_file.read()
+                filename = secure_filename(payment_file.filename)
+                # Add prefix to distinguish payment proofs from invoices
+                payment_filename = f"payment_{filename}"
+                storage_path, error = storage_handler.upload_file(file_data, payment_filename)
+
+                if error:
+                    flash(f"Failed to upload payment proof to cloud storage: {error}", 'danger')
+                    return redirect(url_for('edit_invoice', invoice_id=invoice_id))
+
+                stored_filename = storage_path
+            else:
+                # Fallback to local storage
+                timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
+                filename = secure_filename(payment_file.filename)
+                stored_filename = f"payment_{timestamp}_{filename}"
+                file_path = os.path.join(app.config["UPLOAD_FOLDER"], stored_filename)
+                payment_file.save(file_path)
+        except Exception as exc:
+            flash(f"Error uploading payment proof: {exc}", 'danger')
+            return redirect(url_for('edit_invoice', invoice_id=invoice_id))
+
+    # Update invoice with payment information
+    try:
+        update_data = {
+            "payment_status": "paid",
+            "payment_proof_path": stored_filename,
+            "payment_date": payment_date,
+        }
+
+        result = database.update_invoice(invoice_id, update_data)
+        if result:
+            if stored_filename:
+                flash("Payment proof uploaded successfully. Invoice marked as paid.", 'success')
+            else:
+                flash("Invoice marked as paid.", 'success')
+        else:
+            flash("Invoice not found.", 'danger')
+
+    except Exception as exc:
+        flash(f"Error updating invoice: {exc}", 'danger')
+
+    return redirect(url_for('edit_invoice', invoice_id=invoice_id))
+
+@app.route('/payment_files/<path:filename>')
+def download_payment_proof(filename: str):
+    """Serves payment proof PDFs or redirects to Supabase Storage URL."""
+    # Check if using Supabase Storage
+    if storage_handler.should_use_storage():
+        # Get public URL from Supabase Storage
+        public_url = storage_handler.get_public_url(filename)
+        if public_url:
+            return redirect(public_url)
+        else:
+            abort(404, description="Payment proof file not found in cloud storage")
+    else:
+        # Serve from local storage
+        safe_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+        if not os.path.isfile(safe_path):
+            abort(404)
+        return send_from_directory(app.config["UPLOAD_FOLDER"], filename)
+
+@app.route('/mark_unpaid/<int:invoice_id>', methods=['POST'])
+def mark_unpaid(invoice_id: int):
+    """Mark an invoice as unpaid and remove payment proof."""
+    try:
+        # Get invoice to check if it has a payment proof file
+        invoices = database.get_invoices()
+        invoice = next((inv for inv in invoices if inv['id'] == invoice_id), None)
+
+        if not invoice:
+            flash("Invoice not found.", 'danger')
+            return redirect(url_for('index'))
+
+        # Delete payment proof file if it exists
+        if invoice.get('payment_proof_path'):
+            if storage_handler.should_use_storage():
+                try:
+                    storage_handler.delete_file(invoice['payment_proof_path'])
+                except Exception as exc:
+                    print(f"Failed to delete payment proof from storage: {exc}")
+            else:
+                try:
+                    file_path = os.path.join(app.config["UPLOAD_FOLDER"], invoice['payment_proof_path'])
+                    if os.path.isfile(file_path):
+                        os.remove(file_path)
+                except OSError as exc:
+                    print(f"Failed to delete local payment proof file: {exc}")
+
+        # Update invoice status
+        update_data = {
+            "payment_status": "unpaid",
+            "payment_proof_path": None,
+            "payment_date": None,
+        }
+
+        result = database.update_invoice(invoice_id, update_data)
+        if result:
+            flash("Invoice marked as unpaid.", 'success')
+        else:
+            flash("Failed to update invoice.", 'danger')
+
+    except Exception as exc:
+        flash(f"Error updating invoice: {exc}", 'danger')
+
+    return redirect(url_for('edit_invoice', invoice_id=invoice_id))
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
