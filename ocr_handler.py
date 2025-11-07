@@ -5,6 +5,13 @@ from typing import Dict, List, Optional, Tuple
 
 import fitz  # PyMuPDF
 
+try:
+    import cv2
+    import numpy as np
+    CV2_AVAILABLE = True
+except ImportError:
+    CV2_AVAILABLE = False
+
 
 DATE_FORMATS = [
     "%Y-%m-%d",
@@ -18,14 +25,19 @@ DATE_FORMATS = [
     "%d %B %Y",
     "%b %d, %Y",
     "%B %d, %Y",
+    "%Y年%m月%d日",  # Chinese format
+    "%Y.%m.%d",
+    "%d-%b-%Y",
+    "%d %b, %Y",
 ]
 
 DATE_REGEXES = [
-    r"\b(\d{4}[-/]\d{2}[-/]\d{2})\b",
-    r"\b(\d{2}[-/]\d{2}[-/]\d{4})\b",
-    r"\b(\d{2}\.\d{2}\.\d{4})\b",
-    r"\b([A-Za-z]{3,9}\s+\d{1,2},\s*\d{4})\b",
-    r"\b(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})\b",
+    r"\b(\d{4}[-/\.]\d{1,2}[-/\.]\d{1,2})\b",  # 2025-01-15, 2025.01.15
+    r"\b(\d{1,2}[-/\.]\d{1,2}[-/\.]\d{4})\b",  # 15/01/2025, 15.01.2025
+    r"\b(\d{4}年\d{1,2}月\d{1,2}日)\b",  # 2025年1月15日 (Chinese)
+    r"\b([A-Za-z]{3,9}\s+\d{1,2},\s*\d{4})\b",  # January 15, 2025
+    r"\b(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})\b",  # 15 January 2025
+    r"\b(\d{1,2}[-/][A-Za-z]{3}[-/]\d{4})\b",  # 15-Jan-2025
 ]
 
 COMPANY_KEYWORDS = [
@@ -116,6 +128,79 @@ CONTACT_TERMS = [
     "email",
 ]
 
+def _preprocess_image(image):
+    """
+    Preprocess image for better OCR accuracy.
+
+    Improvements:
+    - Convert to grayscale
+    - Increase contrast
+    - Denoise
+    - Binarization
+    - Deskew
+    """
+    if not CV2_AVAILABLE:
+        # Return original image if OpenCV not available
+        return image
+
+    try:
+        # Convert PIL Image to numpy array
+        if hasattr(image, 'mode'):
+            img_array = np.array(image)
+        else:
+            img_array = image
+
+        # Convert to grayscale
+        if len(img_array.shape) == 3:
+            gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+        else:
+            gray = img_array
+
+        # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        enhanced = clahe.apply(gray)
+
+        # Denoise
+        denoised = cv2.fastNlMeansDenoising(enhanced, None, 10, 7, 21)
+
+        # Adaptive thresholding for binarization
+        binary = cv2.adaptiveThreshold(
+            denoised, 255,
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY,
+            11, 2
+        )
+
+        # Deskew (correct rotation)
+        coords = np.column_stack(np.where(binary > 0))
+        if len(coords) > 0:
+            angle = cv2.minAreaRect(coords)[-1]
+            if angle < -45:
+                angle = -(90 + angle)
+            else:
+                angle = -angle
+
+            # Only apply rotation if angle is significant
+            if abs(angle) > 0.5:
+                (h, w) = binary.shape[:2]
+                center = (w // 2, h // 2)
+                M = cv2.getRotationMatrix2D(center, angle, 1.0)
+                binary = cv2.warpAffine(
+                    binary, M, (w, h),
+                    flags=cv2.INTER_CUBIC,
+                    borderMode=cv2.BORDER_REPLICATE
+                )
+
+        # Convert back to PIL Image
+        from PIL import Image
+        return Image.fromarray(binary)
+
+    except Exception as e:
+        # If preprocessing fails, return original image
+        print(f"Image preprocessing warning: {e}")
+        return image
+
+
 def extract_invoice_data(pdf_path: str) -> Tuple[Dict[str, Optional[str]], List[str]]:
     """Extracts invoice information from a PDF or image file and returns the detected fields plus warnings."""
     text = _extract_text(pdf_path)
@@ -153,9 +238,34 @@ def extract_invoice_data(pdf_path: str) -> Tuple[Dict[str, Optional[str]], List[
     return result, warnings
 
 
+def _clean_ocr_text(text: str) -> str:
+    """Clean OCR text by fixing common recognition errors."""
+    # Remove excessive whitespace
+    cleaned = re.sub(r'\s+', ' ', text)
+
+    # Fix common OCR mistakes
+    replacements = {
+        r'\b0(?=[A-Z])': 'O',  # 0 -> O when followed by uppercase
+        r'\bl(?=[0-9])': '1',  # l -> 1 when followed by digit
+        r'\bI(?=[0-9])': '1',  # I -> 1 when followed by digit
+        r'(?<=[A-Z])0(?=[A-Z])': 'O',  # 0 -> O between uppercase letters
+    }
+
+    for pattern, replacement in replacements.items():
+        cleaned = re.sub(pattern, replacement, cleaned)
+
+    return cleaned
+
+
 def _extract_text(pdf_path: str) -> str:
-    """Returns combined text from all pages in the PDF or image file."""
+    """Returns combined text from all pages in the PDF or image file with enhanced OCR."""
     text_segments = []
+
+    # Enhanced Tesseract configuration
+    # PSM 3: Fully automatic page segmentation (default)
+    # PSM 1: Automatic page segmentation with OSD (Orientation and Script Detection)
+    # OEM 3: Default (both Legacy and LSTM engines)
+    tesseract_config = r'--oem 3 --psm 3 -c preserve_interword_spaces=1'
 
     try:
         # Try to open with PyMuPDF (supports PDF, images like JPEG, PNG, TIFF)
@@ -171,21 +281,66 @@ def _extract_text(pdf_path: str) -> str:
                         import pytesseract
                         from PIL import Image
 
-                        # Convert page to image
-                        pix = page.get_pixmap(dpi=300)
+                        # Convert page to higher resolution image (400 DPI for better accuracy)
+                        pix = page.get_pixmap(dpi=400)
                         img_data = pix.tobytes("png")
                         img = Image.open(io.BytesIO(img_data))
 
-                        # Perform OCR
-                        ocr_text = pytesseract.image_to_string(img, lang='eng')
+                        # Preprocess image for better OCR
+                        processed_img = _preprocess_image(img)
+
+                        # Perform OCR with Chinese and English support
+                        # Try with multiple configurations for better results
+                        ocr_text = None
+
+                        # Try English + Chinese (Traditional and Simplified)
+                        try:
+                            ocr_text = pytesseract.image_to_string(
+                                processed_img,
+                                lang='eng+chi_tra+chi_sim',
+                                config=tesseract_config
+                            )
+                        except Exception:
+                            # Fallback to English only
+                            try:
+                                ocr_text = pytesseract.image_to_string(
+                                    processed_img,
+                                    lang='eng',
+                                    config=tesseract_config
+                                )
+                            except Exception:
+                                pass
+
+                        # If preprocessed image didn't work well, try original
+                        if not ocr_text or len(ocr_text.strip()) < 10:
+                            try:
+                                ocr_text = pytesseract.image_to_string(
+                                    img,
+                                    lang='eng+chi_tra+chi_sim',
+                                    config=tesseract_config
+                                )
+                            except Exception:
+                                try:
+                                    ocr_text = pytesseract.image_to_string(
+                                        img,
+                                        lang='eng',
+                                        config=tesseract_config
+                                    )
+                                except Exception:
+                                    pass
+
                         if ocr_text and ocr_text.strip():
-                            text_segments.append(ocr_text)
+                            cleaned_text = _clean_ocr_text(ocr_text)
+                            text_segments.append(cleaned_text)
+
                     except ImportError:
                         # pytesseract not available, skip OCR
                         pass
-                    except Exception:
+                    except Exception as e:
                         # OCR failed, skip this page
+                        print(f"OCR warning for page: {e}")
                         pass
+
     except Exception as e:
         # If PyMuPDF fails, try with PIL + pytesseract directly for image files
         try:
@@ -193,56 +348,141 @@ def _extract_text(pdf_path: str) -> str:
             from PIL import Image
 
             img = Image.open(pdf_path)
-            ocr_text = pytesseract.image_to_string(img, lang='eng')
+
+            # Preprocess image
+            processed_img = _preprocess_image(img)
+
+            # Try OCR with multiple configurations
+            ocr_text = None
+            try:
+                ocr_text = pytesseract.image_to_string(
+                    processed_img,
+                    lang='eng+chi_tra+chi_sim',
+                    config=tesseract_config
+                )
+            except Exception:
+                try:
+                    ocr_text = pytesseract.image_to_string(
+                        processed_img,
+                        lang='eng',
+                        config=tesseract_config
+                    )
+                except Exception:
+                    pass
+
+            # Try original image if preprocessed didn't work
+            if not ocr_text or len(ocr_text.strip()) < 10:
+                try:
+                    ocr_text = pytesseract.image_to_string(
+                        img,
+                        lang='eng+chi_tra+chi_sim',
+                        config=tesseract_config
+                    )
+                except Exception:
+                    try:
+                        ocr_text = pytesseract.image_to_string(
+                            img,
+                            lang='eng',
+                            config=tesseract_config
+                        )
+                    except Exception:
+                        pass
+
             if ocr_text and ocr_text.strip():
-                text_segments.append(ocr_text)
+                cleaned_text = _clean_ocr_text(ocr_text)
+                text_segments.append(cleaned_text)
+
         except ImportError:
             raise ValueError("Cannot process image files: pytesseract library not installed. Please install it with: pip install pytesseract")
-        except Exception:
-            raise ValueError(f"Failed to extract text from file: {str(e)}")
+        except Exception as ex:
+            raise ValueError(f"Failed to extract text from file: {str(ex)}")
 
     return "\n".join(text_segments)
 
 
 def _find_invoice_number(text: str) -> Optional[str]:
+    """Enhanced invoice number detection with more patterns."""
     patterns = [
-        r"Invoice\s*(?:Number|No\.?|#)\s*[:#]?\s*([A-Za-z0-9\-\/]+)",
-        r"Invoice\s*ID\s*[:#]?\s*([A-Za-z0-9\-\/]+)",
-        r"Inv\.\s*#\s*([A-Za-z0-9\-\/]+)",
+        # Standard formats
+        r"Invoice\s*(?:Number|No\.?|#|NUM)\s*[:#]?\s*([A-Za-z0-9\-\/\\_]+)",
+        r"Invoice\s*ID\s*[:#]?\s*([A-Za-z0-9\-\/\\_]+)",
+        r"Inv\.?\s*(?:No\.?|#|NUM)\s*[:#]?\s*([A-Za-z0-9\-\/\\_]+)",
+        # Common variations
+        r"(?:INV|INVOICE)[-\s]*([A-Z0-9]{3,}[\-\/]?[A-Z0-9]*)",
+        r"Bill\s*(?:No\.?|#)\s*[:#]?\s*([A-Za-z0-9\-\/\\_]+)",
+        r"Receipt\s*(?:No\.?|#)\s*[:#]?\s*([A-Za-z0-9\-\/\\_]+)",
+        # Chinese formats
+        r"(?:发票号码|发票编号|票据号)[：:]\s*([A-Za-z0-9\-\/\\_]+)",
+        r"(?:Invoice|发票)\s*(?:Number|号码|编号)[：:]\s*([A-Za-z0-9\-\/\\_]+)",
     ]
+
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if match:
             candidate = match.group(1).strip()
-            if candidate:
+            # Filter out invalid matches (too short or only special chars)
+            if candidate and len(candidate) >= 3 and re.search(r'[A-Za-z0-9]', candidate):
                 return candidate
+
     return None
 
 
 def _find_total_amount(text: str) -> Optional[float]:
+    """Enhanced total amount detection with more patterns and currency support."""
     patterns = [
-        r"(?:Total\s+(?:Amount|Due)?|Amount\s+Due|Balance\s+Due)\s*[:$]?\s*([\d,]+(?:\.\d+)?)",
-        r"\$\s*([\d,]+(?:\.\d+)?)",
+        # English patterns
+        r"(?:Total\s+(?:Amount|Due|Price)?|Amount\s+Due|Balance\s+Due|Grand\s+Total|Net\s+Total)\s*[:：]?\s*[$¥€£]?\s*([\d,]+(?:\.\d{1,2})?)",
+        r"(?:Subtotal|Sub-total|Sub\s+Total)\s*[:：]?\s*[$¥€£]?\s*([\d,]+(?:\.\d{1,2})?)",
+        r"(?:Total|Sum)[:：]\s*[$¥€£]?\s*([\d,]+(?:\.\d{1,2})?)",
+        # Currency symbols followed by amount
+        r"[$¥€£]\s*([\d,]+(?:\.\d{1,2})?)",
+        # Chinese patterns
+        r"(?:总[计金]额|合[计金]额|应付金额|总价)[：:]\s*[$¥€£]?\s*([\d,，]+(?:\.\d{1,2})?)",
+        r"(?:Total|总额)\s*[$¥€£]?\s*([\d,，]+(?:\.\d{1,2})?)",
+        # Invoice total patterns
+        r"Invoice\s+Total\s*[:：]?\s*[$¥€£]?\s*([\d,]+(?:\.\d{1,2})?)",
     ]
+
+    amounts = []
     for pattern in patterns:
         matches = re.findall(pattern, text, flags=re.IGNORECASE)
         if matches:
-            numbers = [_to_number(value) for value in matches]
-            numbers = [number for number in numbers if number is not None]
-            if numbers:
-                return max(numbers)
+            for value in matches:
+                # Replace Chinese comma with standard comma
+                value = value.replace('，', ',')
+                number = _to_number(value)
+                if number is not None and number > 0:
+                    amounts.append(number)
+
+    if amounts:
+        # Return the maximum amount found (usually the total)
+        return max(amounts)
+
     return None
 
 
 def _find_invoice_date(text: str, lines: List[str]) -> Optional[str]:
+    """Enhanced date detection with English and Chinese keyword support."""
     keyword_targets = [
+        # English keywords
         "invoice date",
         "date of invoice",
         "issue date",
         "issued on",
+        "date issued",
+        "billing date",
+        "bill date",
+        # Chinese keywords
+        "发票日期",
+        "开票日期",
+        "日期",
+        "开具日期",
     ]
+
+    # First, search lines with keywords
     for line in lines:
         lowered = line.lower()
+        # Check English keywords
         if any(keyword in lowered for keyword in keyword_targets):
             match = _search_line_for_date(line)
             if match:
@@ -250,12 +490,28 @@ def _find_invoice_date(text: str, lines: List[str]) -> Optional[str]:
                 if normalized:
                     return normalized
 
+        # Check Chinese keywords
+        if any(keyword in line for keyword in ["发票日期", "开票日期", "开具日期"]):
+            match = _search_line_for_date(line)
+            if match:
+                normalized = _normalize_date(match)
+                if normalized:
+                    return normalized
+
+    # If not found in keyword lines, search entire text
     for pattern in DATE_REGEXES:
         matches = re.findall(pattern, text)
         for match in matches:
             normalized = _normalize_date(match)
             if normalized:
-                return normalized
+                # Validate year is reasonable (between 2000-2050)
+                try:
+                    year = int(normalized.split('-')[0])
+                    if 2000 <= year <= 2050:
+                        return normalized
+                except:
+                    pass
+
     return None
 
 
