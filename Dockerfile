@@ -27,6 +27,9 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 # Copy application files
 COPY . .
 
+# Make start script executable
+RUN chmod +x start.sh
+
 # Create uploads directory
 RUN mkdir -p uploads && chmod 755 uploads
 
@@ -41,5 +44,7 @@ ENV FLASK_APP=app.py
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
     CMD python -c "import requests; requests.get('http://localhost:8000/health', timeout=5)" || exit 1
 
-# Run with gunicorn
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "--workers", "4", "--timeout", "120", "app:app"]
+# Run with gunicorn via start script
+# Default: 1 worker for Render free tier (512MB RAM)
+# Override with GUNICORN_WORKERS environment variable for paid plans
+CMD ["./start.sh"]
