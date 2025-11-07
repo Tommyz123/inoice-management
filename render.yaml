@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: invoice-management
+    env: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: 1
+      - key: PORT
+        value: 8000
+      - key: SECRET_KEY
+        generateValue: true
+      - key: DATA_BACKEND
+        value: sqlite
+        sync: false
+      - key: DEBUG
+        value: false
+        sync: false
+    healthCheckPath: /health
+    autoDeploy: true
