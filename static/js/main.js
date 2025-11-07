@@ -154,15 +154,27 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     const file = fileInput.files[0];
-    if (file.type !== "application/pdf") {
-      showStatus("Only PDF files are supported for recognition.", "danger");
+    // Support PDF and image formats (JPEG, PNG, TIFF)
+    const allowedTypes = [
+      "application/pdf",
+      "image/jpeg",
+      "image/jpg",
+      "image/png",
+      "image/tiff",
+      "image/tif"
+    ];
+
+    if (!allowedTypes.includes(file.type.toLowerCase())) {
+      showStatus("Only PDF, JPEG, PNG, and TIFF files are supported for recognition.", "danger");
       return;
     }
 
     const formData = new FormData();
     formData.append("invoiceFile", file);
 
-    showStatus("Reading PDF and extracting fields…", "info");
+    // Show appropriate message based on file type
+    const fileTypeLabel = file.type === "application/pdf" ? "PDF" : "image";
+    showStatus(`Reading ${fileTypeLabel} and extracting fields…`, "info");
 
     try {
       const response = await fetch("/api/ocr", {
