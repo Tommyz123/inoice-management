@@ -25,7 +25,6 @@ DATE_FORMATS = [
     "%d %B %Y",
     "%b %d, %Y",
     "%B %d, %Y",
-    "%Y年%m月%d日",  # Chinese format
     "%Y.%m.%d",
     "%d-%b-%Y",
     "%d %b, %Y",
@@ -34,7 +33,6 @@ DATE_FORMATS = [
 DATE_REGEXES = [
     r"\b(\d{4}[-/\.]\d{1,2}[-/\.]\d{1,2})\b",  # 2025-01-15, 2025.01.15
     r"\b(\d{1,2}[-/\.]\d{1,2}[-/\.]\d{4})\b",  # 15/01/2025, 15.01.2025
-    r"\b(\d{4}年\d{1,2}月\d{1,2}日)\b",  # 2025年1月15日 (Chinese)
     r"\b([A-Za-z]{3,9}\s+\d{1,2},\s*\d{4})\b",  # January 15, 2025
     r"\b(\d{1,2}\s+[A-Za-z]{3,9}\s+\d{4})\b",  # 15 January 2025
     r"\b(\d{1,2}[-/][A-Za-z]{3}[-/]\d{4})\b",  # 15-Jan-2025
@@ -289,45 +287,27 @@ def _extract_text(pdf_path: str) -> str:
                         # Preprocess image for better OCR
                         processed_img = _preprocess_image(img)
 
-                        # Perform OCR with Chinese and English support
-                        # Try with multiple configurations for better results
+                        # Perform OCR (English only)
                         ocr_text = None
-
-                        # Try English + Chinese (Traditional and Simplified)
                         try:
                             ocr_text = pytesseract.image_to_string(
                                 processed_img,
-                                lang='eng+chi_tra+chi_sim',
+                                lang='eng',
                                 config=tesseract_config
                             )
                         except Exception:
-                            # Fallback to English only
-                            try:
-                                ocr_text = pytesseract.image_to_string(
-                                    processed_img,
-                                    lang='eng',
-                                    config=tesseract_config
-                                )
-                            except Exception:
-                                pass
+                            pass
 
                         # If preprocessed image didn't work well, try original
                         if not ocr_text or len(ocr_text.strip()) < 10:
                             try:
                                 ocr_text = pytesseract.image_to_string(
                                     img,
-                                    lang='eng+chi_tra+chi_sim',
+                                    lang='eng',
                                     config=tesseract_config
                                 )
                             except Exception:
-                                try:
-                                    ocr_text = pytesseract.image_to_string(
-                                        img,
-                                        lang='eng',
-                                        config=tesseract_config
-                                    )
-                                except Exception:
-                                    pass
+                                pass
 
                         if ocr_text and ocr_text.strip():
                             cleaned_text = _clean_ocr_text(ocr_text)
@@ -352,41 +332,27 @@ def _extract_text(pdf_path: str) -> str:
             # Preprocess image
             processed_img = _preprocess_image(img)
 
-            # Try OCR with multiple configurations
+            # English-only OCR
             ocr_text = None
             try:
                 ocr_text = pytesseract.image_to_string(
                     processed_img,
-                    lang='eng+chi_tra+chi_sim',
+                    lang='eng',
                     config=tesseract_config
                 )
             except Exception:
-                try:
-                    ocr_text = pytesseract.image_to_string(
-                        processed_img,
-                        lang='eng',
-                        config=tesseract_config
-                    )
-                except Exception:
-                    pass
+                pass
 
             # Try original image if preprocessed didn't work
             if not ocr_text or len(ocr_text.strip()) < 10:
                 try:
                     ocr_text = pytesseract.image_to_string(
                         img,
-                        lang='eng+chi_tra+chi_sim',
+                        lang='eng',
                         config=tesseract_config
                     )
                 except Exception:
-                    try:
-                        ocr_text = pytesseract.image_to_string(
-                            img,
-                            lang='eng',
-                            config=tesseract_config
-                        )
-                    except Exception:
-                        pass
+                    pass
 
             if ocr_text and ocr_text.strip():
                 cleaned_text = _clean_ocr_text(ocr_text)
@@ -411,9 +377,6 @@ def _find_invoice_number(text: str) -> Optional[str]:
         r"(?:INV|INVOICE)[-\s]*([A-Z0-9]{3,}[\-\/]?[A-Z0-9]*)",
         r"Bill\s*(?:No\.?|#)\s*[:#]?\s*([A-Za-z0-9\-\/\\_]+)",
         r"Receipt\s*(?:No\.?|#)\s*[:#]?\s*([A-Za-z0-9\-\/\\_]+)",
-        # Chinese formats
-        r"(?:发票号码|发票编号|票据号)[：:]\s*([A-Za-z0-9\-\/\\_]+)",
-        r"(?:Invoice|发票)\s*(?:Number|号码|编号)[：:]\s*([A-Za-z0-9\-\/\\_]+)",
     ]
 
     for pattern in patterns:
@@ -431,16 +394,13 @@ def _find_total_amount(text: str) -> Optional[float]:
     """Enhanced total amount detection with more patterns and currency support."""
     patterns = [
         # English patterns
-        r"(?:Total\s+(?:Amount|Due|Price)?|Amount\s+Due|Balance\s+Due|Grand\s+Total|Net\s+Total)\s*[:：]?\s*[$¥€£]?\s*([\d,]+(?:\.\d{1,2})?)",
-        r"(?:Subtotal|Sub-total|Sub\s+Total)\s*[:：]?\s*[$¥€£]?\s*([\d,]+(?:\.\d{1,2})?)",
-        r"(?:Total|Sum)[:：]\s*[$¥€£]?\s*([\d,]+(?:\.\d{1,2})?)",
+        r"(?:Total\s+(?:Amount|Due|Price)?|Amount\s+Due|Balance\s+Due|Grand\s+Total|Net\s+Total)\s*[:]?\s*[$¥€£]?\s*([\d,]+(?:\.\d{1,2})?)",
+        r"(?:Subtotal|Sub-total|Sub\s+Total)\s*[:]?\s*[$¥€£]?\s*([\d,]+(?:\.\d{1,2})?)",
+        r"(?:Total|Sum)[:]?\s*[$¥€£]?\s*([\d,]+(?:\.\d{1,2})?)",
         # Currency symbols followed by amount
         r"[$¥€£]\s*([\d,]+(?:\.\d{1,2})?)",
-        # Chinese patterns
-        r"(?:总[计金]额|合[计金]额|应付金额|总价)[：:]\s*[$¥€£]?\s*([\d,，]+(?:\.\d{1,2})?)",
-        r"(?:Total|总额)\s*[$¥€£]?\s*([\d,，]+(?:\.\d{1,2})?)",
         # Invoice total patterns
-        r"Invoice\s+Total\s*[:：]?\s*[$¥€£]?\s*([\d,]+(?:\.\d{1,2})?)",
+        r"Invoice\s+Total\s*[:]?\s*[$¥€£]?\s*([\d,]+(?:\.\d{1,2})?)",
     ]
 
     amounts = []
@@ -448,8 +408,6 @@ def _find_total_amount(text: str) -> Optional[float]:
         matches = re.findall(pattern, text, flags=re.IGNORECASE)
         if matches:
             for value in matches:
-                # Replace Chinese comma with standard comma
-                value = value.replace('，', ',')
                 number = _to_number(value)
                 if number is not None and number > 0:
                     amounts.append(number)
@@ -462,9 +420,8 @@ def _find_total_amount(text: str) -> Optional[float]:
 
 
 def _find_invoice_date(text: str, lines: List[str]) -> Optional[str]:
-    """Enhanced date detection with English and Chinese keyword support."""
+    """Enhanced date detection with English keyword support."""
     keyword_targets = [
-        # English keywords
         "invoice date",
         "date of invoice",
         "issue date",
@@ -472,26 +429,12 @@ def _find_invoice_date(text: str, lines: List[str]) -> Optional[str]:
         "date issued",
         "billing date",
         "bill date",
-        # Chinese keywords
-        "发票日期",
-        "开票日期",
-        "日期",
-        "开具日期",
     ]
 
     # First, search lines with keywords
     for line in lines:
         lowered = line.lower()
-        # Check English keywords
         if any(keyword in lowered for keyword in keyword_targets):
-            match = _search_line_for_date(line)
-            if match:
-                normalized = _normalize_date(match)
-                if normalized:
-                    return normalized
-
-        # Check Chinese keywords
-        if any(keyword in line for keyword in ["发票日期", "开票日期", "开具日期"]):
             match = _search_line_for_date(line)
             if match:
                 normalized = _normalize_date(match)
