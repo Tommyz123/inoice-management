@@ -5,15 +5,9 @@ FROM python:3.11-slim
 WORKDIR /app
 
 # Install system dependencies for OCR and image processing
-# Only English OCR support (no Chinese language packs needed)
-RUN apt-get update && apt-get install -y \
+# Minimal dependencies for Render compatibility
+RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
-    tesseract-ocr-eng \
-    libgl1-mesa-glx \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
