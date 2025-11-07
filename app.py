@@ -85,6 +85,89 @@ def health_check():
     }), 200
 
 
+@app.route('/test-ocr')
+def test_ocr_endpoint():
+    """Test OCR functionality endpoint for debugging."""
+    import subprocess
+
+    result = {
+        "tesseract_installed": False,
+        "tesseract_path": None,
+        "tesseract_version": None,
+        "languages": [],
+        "pytesseract_available": False,
+        "ocr_test": None,
+        "error": None
+    }
+
+    try:
+        # Check tesseract command
+        proc = subprocess.run(
+            ["which", "tesseract"],
+            capture_output=True,
+            text=True,
+            timeout=5
+        )
+        result["tesseract_installed"] = proc.returncode == 0
+        result["tesseract_path"] = proc.stdout.strip() if proc.returncode == 0 else None
+
+        if result["tesseract_installed"]:
+            # Get version
+            proc = subprocess.run(
+                ["tesseract", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            version_lines = (proc.stderr or proc.stdout).split('\n')
+            result["tesseract_version"] = version_lines[0] if version_lines else "unknown"
+
+            # Get languages
+            proc = subprocess.run(
+                ["tesseract", "--list-langs"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if proc.stdout:
+                langs = [
+                    line.strip() for line in proc.stdout.split('\n')
+                    if line.strip() and not line.startswith("List")
+                ]
+                result["languages"] = langs
+
+        # Test pytesseract
+        try:
+            import pytesseract
+            from PIL import Image, ImageDraw
+
+            result["pytesseract_available"] = True
+
+            # Create test image
+            img = Image.new('RGB', (300, 100), color='white')
+            draw = ImageDraw.Draw(img)
+            draw.text((10, 40), "TEST OCR 12345", fill='black')
+
+            # Try OCR
+            text = pytesseract.image_to_string(img, lang='eng')
+            result["ocr_test"] = {
+                "success": bool(text.strip()),
+                "output": text.strip(),
+                "length": len(text.strip())
+            }
+
+        except ImportError as e:
+            result["pytesseract_available"] = False
+            result["ocr_test"] = {"success": False, "error": f"ImportError: {str(e)}"}
+        except Exception as e:
+            result["ocr_test"] = {"success": False, "error": str(e)}
+
+    except Exception as e:
+        result["error"] = str(e)
+
+    return jsonify(result), 200
+
+
 @app.route('/')
 def index():
     company_name = (request.args.get('companyName') or '').strip()
