@@ -19,5 +19,11 @@ services:
       - key: DEBUG
         value: false
         sync: false
+      - key: GUNICORN_WORKERS
+        value: 1
+        sync: false
+        # Free tier: 1 worker (512MB RAM)
+        # Starter: 2 workers (2GB RAM)
+        # Standard+: 4 workers (4GB+ RAM)
     healthCheckPath: /health
     autoDeploy: true
