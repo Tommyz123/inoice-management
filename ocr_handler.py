@@ -1,3 +1,4 @@
+import io
 import re
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
@@ -116,10 +117,10 @@ CONTACT_TERMS = [
 ]
 
 def extract_invoice_data(pdf_path: str) -> Tuple[Dict[str, Optional[str]], List[str]]:
-    """Extracts invoice information from a PDF and returns the detected fields plus warnings."""
+    """Extracts invoice information from a PDF or image file and returns the detected fields plus warnings."""
     text = _extract_text(pdf_path)
     if not text.strip():
-        raise ValueError("No readable text detected in the PDF. Please fill the fields manually.")
+        raise ValueError("No readable text detected in the file. Please fill the fields manually.")
 
     lines = [line.strip() for line in text.splitlines() if line.strip()]
 
@@ -153,13 +154,53 @@ def extract_invoice_data(pdf_path: str) -> Tuple[Dict[str, Optional[str]], List[
 
 
 def _extract_text(pdf_path: str) -> str:
-    """Returns combined text from all pages in the PDF."""
+    """Returns combined text from all pages in the PDF or image file."""
     text_segments = []
-    with fitz.open(pdf_path) as doc:
-        for page in doc:
-            page_text = page.get_text("text")
-            if page_text:
-                text_segments.append(page_text)
+
+    try:
+        # Try to open with PyMuPDF (supports PDF, images like JPEG, PNG, TIFF)
+        with fitz.open(pdf_path) as doc:
+            for page in doc:
+                # First try to extract embedded text
+                page_text = page.get_text("text")
+                if page_text and page_text.strip():
+                    text_segments.append(page_text)
+                else:
+                    # If no embedded text, try OCR with pytesseract
+                    try:
+                        import pytesseract
+                        from PIL import Image
+
+                        # Convert page to image
+                        pix = page.get_pixmap(dpi=300)
+                        img_data = pix.tobytes("png")
+                        img = Image.open(io.BytesIO(img_data))
+
+                        # Perform OCR
+                        ocr_text = pytesseract.image_to_string(img, lang='eng')
+                        if ocr_text and ocr_text.strip():
+                            text_segments.append(ocr_text)
+                    except ImportError:
+                        # pytesseract not available, skip OCR
+                        pass
+                    except Exception:
+                        # OCR failed, skip this page
+                        pass
+    except Exception as e:
+        # If PyMuPDF fails, try with PIL + pytesseract directly for image files
+        try:
+            import pytesseract
+            from PIL import Image
+
+            img = Image.open(pdf_path)
+            ocr_text = pytesseract.image_to_string(img, lang='eng')
+            if ocr_text and ocr_text.strip():
+                text_segments.append(ocr_text)
+        except ImportError:
+            raise ValueError("Cannot process image files: pytesseract library not installed. Please install it with: pip install pytesseract")
+        except Exception:
+            raise ValueError(f"Failed to extract text from file: {str(e)}")
+
     return "\n".join(text_segments)
 
 

@@ -21,6 +21,20 @@ class StorageError(Exception):
     pass
 
 
+def _get_mime_type(filename: str) -> str:
+    """Get MIME type based on file extension."""
+    ext = filename.rsplit(".", 1)[1].lower() if "." in filename else ""
+    mime_types = {
+        "pdf": "application/pdf",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "png": "image/png",
+        "tiff": "image/tiff",
+        "tif": "image/tiff",
+    }
+    return mime_types.get(ext, "application/octet-stream")
+
+
 def _get_storage_client():
     """Initialize and return Supabase storage client."""
     if not config.SUPABASE_URL or not config.SUPABASE_KEY:
@@ -70,7 +84,7 @@ def init_storage_bucket(bucket_name: str = "invoices") -> Tuple[bool, str]:
                 options={
                     "public": True,  # Allow public read access
                     "file_size_limit": 10485760,  # 10MB limit
-                    "allowed_mime_types": ["application/pdf"]
+                    "allowed_mime_types": ["application/pdf", "image/jpeg", "image/png", "image/tiff"]
                 }
             )
             return True, f"Bucket '{bucket_name}' created successfully."
@@ -113,12 +127,15 @@ def upload_file(file_data: bytes, original_filename: str, bucket_name: str = "in
         safe_filename = "".join(c for c in original_filename if c.isalnum() or c in ".-_")
         storage_path = f"{timestamp}_{safe_filename}"
 
+        # Get MIME type based on file extension
+        mime_type = _get_mime_type(original_filename)
+
         # Upload file (pass bytes directly)
         response = client.storage.from_(bucket_name).upload(
             path=storage_path,
             file=file_data,
             file_options={
-                "content-type": "application/pdf",
+                "content-type": mime_type,
                 "cache-control": "3600",
                 "upsert": "false"
             }

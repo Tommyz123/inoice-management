@@ -24,7 +24,7 @@ app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "change-me")
 app.config["UPLOAD_FOLDER"] = os.path.join(os.path.dirname(__file__), "uploads")
 app.config["MAX_CONTENT_LENGTH"] = 10 * 1024 * 1024  # 10MB max file size
 
-ALLOWED_EXTENSIONS = {"pdf"}
+ALLOWED_EXTENSIONS = {"pdf", "jpg", "jpeg", "png", "tiff", "tif"}
 
 # Create uploads directory with error handling
 try:
@@ -37,6 +37,20 @@ except Exception as e:
 def allowed_file(filename: str) -> bool:
     """Returns True when the file extension is part of the allowed list."""
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def get_mime_type(filename: str) -> str:
+    """Returns the MIME type based on file extension."""
+    ext = filename.rsplit(".", 1)[1].lower() if "." in filename else ""
+    mime_types = {
+        "pdf": "application/pdf",
+        "jpg": "image/jpeg",
+        "jpeg": "image/jpeg",
+        "png": "image/png",
+        "tiff": "image/tiff",
+        "tif": "image/tiff",
+    }
+    return mime_types.get(ext, "application/octet-stream")
 
 
 def format_date_english(date_string):
@@ -153,7 +167,7 @@ def upload():
         stored_filename = None
         if file and file.filename:
             if not allowed_file(file.filename):
-                flash("Only PDF files are supported.", 'danger')
+                flash("Supported file types: PDF, JPEG, PNG, TIFF", 'danger')
                 return redirect(url_for('upload'))
 
             # Check if Supabase Storage is enabled
@@ -205,12 +219,15 @@ def upload():
 def api_ocr():
     file = request.files.get('invoiceFile')
     if not file or file.filename == '':
-        return jsonify(success=False, message="Please upload a PDF file."), 400
+        return jsonify(success=False, message="Please upload a file."), 400
 
     if not allowed_file(file.filename):
-        return jsonify(success=False, message="Only PDF files are supported."), 400
+        return jsonify(success=False, message="Supported file types: PDF, JPEG, PNG, TIFF"), 400
 
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as temp_file:
+    # Get file extension for temp file
+    ext = file.filename.rsplit(".", 1)[1].lower() if "." in file.filename else "pdf"
+
+    with tempfile.NamedTemporaryFile(delete=False, suffix=f".{ext}") as temp_file:
         temp_path = temp_file.name
         file.save(temp_path)
 
@@ -368,7 +385,7 @@ def upload_payment_proof(invoice_id: int):
     # Only process file if one was uploaded
     if payment_file and payment_file.filename:
         if not allowed_file(payment_file.filename):
-            flash("Only PDF files are supported for payment proof.", 'danger')
+            flash("Supported file types for payment proof: PDF, JPEG, PNG, TIFF", 'danger')
             return redirect(url_for('edit_invoice', invoice_id=invoice_id))
 
         try:
