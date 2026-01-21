@@ -109,8 +109,31 @@ def health_check():
     return jsonify({
         "status": "healthy",
         "service": "invoice-management-system",
-        "backend": database.current_backend()
+        "backend": database.get_backend()
     }), 200
+
+
+# 付款历史包装函数
+def create_payment_record(data):
+    """创建付款历史记录"""
+    try:
+        backend = database._get_backend()
+        return backend.create_payment_record(data)
+    except Exception as e:
+        print(f"Error creating payment record: {e}")
+        import traceback
+        traceback.print_exc()
+    return None
+
+def get_payment_history(invoice_id):
+    """获取付款历史"""
+    try:
+        backend = database._get_backend()
+        return backend.get_payment_history(invoice_id)
+    except Exception as e:
+        print(f"Error getting payment history: {e}")
+    return []
+
 
 
 @app.route('/test-ocr')
@@ -440,7 +463,9 @@ def edit_invoice(invoice_id: int):
         flash("Invoice not found.", 'danger')
         return redirect(url_for('index'))
 
-    return render_template('edit.html', invoice=invoice)
+    # 获取付款历史
+    payment_history = get_payment_history(invoice_id)
+    return render_template('edit.html', invoice=invoice, payment_history=payment_history)
 
 @app.route('/delete/<int:invoice_id>', methods=['POST'])
 def delete_invoice(invoice_id: int):
@@ -594,6 +619,20 @@ def upload_payment_proof(invoice_id: int):
     try:
         result = database.update_invoice(invoice_id, update_data)
         if result:
+            # 创建付款历史记录(如果有付款)
+            if has_payment:
+                try:
+                    create_payment_record({
+                        'invoice_id': invoice_id,
+                        'payment_amount': new_payment,
+                        'payment_date': payment_date,
+                        'payment_proof_path': stored_filename,
+                        'notes': f'Payment of ${new_payment:.2f}'
+                    })
+                    print(f"✅ Payment record created: ${new_payment:.2f}")
+                except Exception as e:
+                    print(f"⚠️ Failed to create payment record: {e}")
+            
             messages = []
             if has_credit_update:
                 messages.append(f"Credit updated: ${update_data.get('credit', 0):.2f}")
@@ -666,6 +705,16 @@ def mark_unpaid(invoice_id: int):
 
         result = database.update_invoice(invoice_id, update_data)
         if result:
+            # 创建付款历史记录(如果有付款)
+            if has_payment:
+                create_payment_record({
+                    'invoice_id': invoice_id,
+                    'payment_amount': new_payment,
+                    'payment_date': payment_date,
+                    'payment_proof_path': stored_filename,
+                    'notes': f'Payment of ${new_payment:.2f}'
+                })
+            
             flash("Invoice marked as unpaid.", 'success')
         else:
             flash("Failed to update invoice.", 'danger')

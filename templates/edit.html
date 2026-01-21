@@ -100,7 +100,59 @@
                     <h3 class="mb-0"><i class="fas fa-receipt me-2"></i>Payment Information</h3>
                 </div>
                 <div class="card-body">
-                    <!-- Credit Amount -->
+                    <!-- Payment History -->
+                    {% if payment_history and payment_history|length > 0 %}
+                    <div class="mb-4">
+                        <h5><i class="fas fa-history me-2"></i>Payment History</h5>
+                        <div class="table-responsive">
+                            <table class="table table-sm table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Date</th>
+                                        <th class="text-end">Amount</th>
+                                        <th>Proof</th>
+                                        <th>Time</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for record in payment_history %}
+                                    <tr>
+                                        <td>{{ record.payment_date }}</td>
+                                        <td class="text-end">${{ "{:,.2f}".format(record.payment_amount) }}</td>
+                                        <td>
+                                            {% if record.payment_proof_path %}
+                                            <a href="{{ url_for('download_payment_proof', filename=record.payment_proof_path) }}"
+                                                target="_blank" class="btn btn-sm btn-outline-primary">
+                                                <i class="fas fa-file-pdf"></i> View
+                                            </a>
+                                            {% else %}
+                                            <span class="text-muted">-</span>
+                                            {% endif %}
+                                        </td>
+                                        <td><small class="text-muted">{{ record.created_at }}</small></td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                                <tfoot>
+                                    <tr class="table-active">
+                                        <td><strong>Total Paid</strong></td>
+                                        <td class="text-end"><strong>${{
+                                                "{:,.2f}".format(invoice.paid_amount|default(0)) }}</strong></td>
+                                        <td colspan="2"></td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                        <hr>
+                    </div>
+                    {% else %}
+                    <!-- No Payment History -->
+                    <div class="alert alert-info mb-3">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>No payment history yet.</strong> Payment records will appear here after you submit
+                        payments.
+                    </div>
+                    {% endif %}
 
                     {% if invoice.payment_status == 'paid' %}
                     <!-- Paid Invoice Display -->
@@ -151,14 +203,17 @@
                         </div>
                     </div>
 
-                    <form method="post" action="{{ url_for('upload_payment_proof', invoice_id=invoice.id) }}"
-                        <!-- Credit Amount -->
+                    <form method="post" action="{{ url_for('upload_payment_proof', invoice_id=invoice.id) }}" <!--
+                        Credit Amount -->
                         <div class="mb-4">
-                            <label for="credit" class="form-label"><i class="fas fa-gift me-2"></i>Credit Amount <span class="text-muted">(Optional)</span></label>
-                            <input type="number" step="0.01" class="form-control" id="credit" name="credit" value="{{ invoice.credit|default(0.00) }}">
-                            <small class="form-text text-muted">Credit from company (e.g., refunds) that can be deducted from remaining amount</small>
+                            <label for="credit" class="form-label"><i class="fas fa-gift me-2"></i>Credit Amount <span
+                                    class="text-muted">(Optional)</span></label>
+                            <input type="number" step="0.01" class="form-control" id="credit" name="credit"
+                                value="{{ invoice.credit|default(0.00) }}">
+                            <small class="form-text text-muted">Credit from company (e.g., refunds) that can be deducted
+                                from remaining amount</small>
                         </div>
-                        
+
                         enctype="multipart/form-data">
                         <!-- Payment Progress -->
                         <div class="mb-4">
@@ -182,13 +237,16 @@
                         <div class="row g-3">
                             <div class="col-md-6">
                                 <label for="paidAmount" class="form-label"><i
-                                        class="fas fa-money-bill-wave me-2"></i>Paid Amount <span class="text-muted">(Optional)</span></label>
+                                        class="fas fa-money-bill-wave me-2"></i>Paid Amount <span
+                                        class="text-muted">(Optional)</span></label>
                                 <input type="number" step="0.01" class="form-control" id="paidAmount" name="paidAmount">
-                                <small class="form-text text-muted">Enter the amount you are paying now (leave empty if only updating credit)</small>
+                                <small class="form-text text-muted">Enter the amount you are paying now (leave empty if
+                                    only updating credit)</small>
                             </div>
                             <div class="col-md-6">
                                 <label for="paymentDate" class="form-label"><i
-                                        class="fas fa-calendar-check me-2"></i>Payment Date <span class="text-muted">(Optional)</span></label>
+                                        class="fas fa-calendar-check me-2"></i>Payment Date <span
+                                        class="text-muted">(Optional)</span></label>
                                 <input type="date" class="form-control" id="paymentDate" name="paymentDate">
                             </div>
                             <div class="col-md-12">

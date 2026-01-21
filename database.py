@@ -28,6 +28,18 @@ class Invoice(Base):
     credit = Column(Float, nullable=False, default=0.00)
     paid_amount = Column(Float, nullable=False, default=0.00)
 
+class PaymentHistory(Base):
+    """付款历史记录模型"""
+    __tablename__ = "payment_history"
+    
+    id = Column(Integer, primary_key=True)
+    invoice_id = Column(Integer, nullable=False)
+    payment_amount = Column(Float, nullable=False)
+    payment_date = Column(String(32), nullable=False)
+    payment_proof_path = Column(String(512), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(String(32), nullable=True)
+
 
 def _determine_backend() -> str:
     preferred = os.getenv("DATA_BACKEND", "").strip().lower()
@@ -56,6 +68,23 @@ class SQLiteBackend:
         )
         
         Base.metadata.create_all(self.engine)
+        
+        # 创建 payment_history 表
+        with self.engine.connect() as conn:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS payment_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    invoice_id INTEGER NOT NULL,
+                    payment_amount REAL NOT NULL,
+                    payment_date TEXT NOT NULL,
+                    payment_proof_path TEXT,
+                    notes TEXT,
+                    created_at TEXT DEFAULT (datetime('now')),
+                    FOREIGN KEY (invoice_id) REFERENCES invoices(id) ON DELETE CASCADE
+                )
+            """))
+            conn.commit()
+
         
         # 自动迁移: 检测并添加缺失字段
         self._auto_migrate_sqlite()
@@ -191,7 +220,95 @@ class SQLiteBackend:
         }
 
 
+    def create_payment_record(self, data: Dict[str, Any]) -> Optional[int]:
+        """创建付款历史记录"""
+        from datetime import datetime
+        with self.engine.connect() as conn:
+            result = conn.execute(text("""
+                INSERT INTO payment_history 
+                (invoice_id, payment_amount, payment_date, payment_proof_path, notes, created_at)
+                VALUES (:invoice_id, :payment_amount, :payment_date, :payment_proof_path, :notes, :created_at)
+            """), {
+                'invoice_id': data['invoice_id'],
+                'payment_amount': data['payment_amount'],
+                'payment_date': data['payment_date'],
+                'payment_proof_path': data.get('payment_proof_path'),
+                'notes': data.get('notes', ''),
+                'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            })
+            conn.commit()
+            return result.lastrowid
+    
+    def get_payment_history(self, invoice_id: int) -> List[Dict[str, Any]]:
+        """获取发票的付款历史记录"""
+        with self.engine.connect() as conn:
+            result = conn.execute(text("""
+                SELECT id, invoice_id, payment_amount, payment_date, 
+                       payment_proof_path, notes, created_at
+                FROM payment_history
+                WHERE invoice_id = :invoice_id
+                ORDER BY created_at DESC
+            """), {'invoice_id': invoice_id})
+            
+            records = []
+            for row in result.fetchall():
+                records.append({
+                    'id': row[0],
+                    'invoice_id': row[1],
+                    'payment_amount': row[2],
+                    'payment_date': row[3],
+                    'payment_proof_path': row[4],
+                    'notes': row[5],
+                    'created_at': row[6]
+                })
+            return records
+
+
 # ---------- Supabase Backend ----------
+
+
+    def create_payment_record(self, data: Dict[str, Any]) -> Optional[int]:
+        """创建付款历史记录"""
+        from datetime import datetime
+        with self.engine.connect() as conn:
+            result = conn.execute(text("""
+                INSERT INTO payment_history 
+                (invoice_id, payment_amount, payment_date, payment_proof_path, notes, created_at)
+                VALUES (:invoice_id, :payment_amount, :payment_date, :payment_proof_path, :notes, :created_at)
+            """), {
+                'invoice_id': data['invoice_id'],
+                'payment_amount': data['payment_amount'],
+                'payment_date': data['payment_date'],
+                'payment_proof_path': data.get('payment_proof_path'),
+                'notes': data.get('notes', ''),
+                'created_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            })
+            conn.commit()
+            return result.lastrowid
+    
+    def get_payment_history(self, invoice_id: int) -> List[Dict[str, Any]]:
+        """获取发票的付款历史记录"""
+        with self.engine.connect() as conn:
+            result = conn.execute(text("""
+                SELECT id, invoice_id, payment_amount, payment_date, 
+                       payment_proof_path, notes, created_at
+                FROM payment_history
+                WHERE invoice_id = :invoice_id
+                ORDER BY created_at DESC
+            """), {'invoice_id': invoice_id})
+            
+            records = []
+            for row in result.fetchall():
+                records.append({
+                    'id': row[0],
+                    'invoice_id': row[1],
+                    'payment_amount': row[2],
+                    'payment_date': row[3],
+                    'payment_proof_path': row[4],
+                    'notes': row[5],
+                    'created_at': row[6]
+                })
+            return records
 
 class SupabaseBackend:
     def __init__(self) -> None:
@@ -396,6 +513,50 @@ class SupabaseBackend:
         except Exception as e:
             print(f"Auto-migration warning: {e}")
 
+
+    
+    def create_payment_record(self, data: Dict[str, Any]) -> Optional[int]:
+        """创建付款历史记录"""
+        record_data = {
+            'invoice_id': data['invoice_id'],
+            'payment_amount': data['payment_amount'],
+            'payment_date': data['payment_date'],
+            'payment_proof_path': data.get('payment_proof_path'),
+            'notes': data.get('notes', '')
+        }
+        response = self.client.table("payment_history").insert(record_data).execute()
+        if response.data:
+            return response.data[0]['id']
+        return None
+    
+    def get_payment_history(self, invoice_id: int) -> List[Dict[str, Any]]:
+        """获取发票的付款历史记录"""
+        response = self.client.table("payment_history")\
+            .select("*")\
+            .eq("invoice_id", invoice_id)\
+            .order("created_at", desc=True)\
+            .execute()
+        return response.data or []
+
+
+    def create_payment_record(self, data: Dict[str, Any]) -> Optional[int]:
+        """创建付款历史记录"""
+        record_data = {
+            'invoice_id': data['invoice_id'],
+            'payment_amount': data['payment_amount'],
+            'payment_date': data['payment_date'],
+            'payment_proof_path': data.get('payment_proof_path'),
+            'notes': data.get('notes', '')
+        }
+        response = self.client.table("payment_history").insert(record_data).execute()
+        if response.data:
+            return response.data[0]['id']
+        return None
+    
+    def get_payment_history(self, invoice_id: int) -> List[Dict[str, Any]]:
+        """获取发票的付款历史记录"""
+        response = self.client.table("payment_history").select("*").eq("invoice_id", invoice_id).order("created_at", desc=True).execute()
+        return response.data or []
 
 # ---------- Backend Dispatch ----------
 
