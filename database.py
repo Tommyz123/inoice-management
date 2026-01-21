@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-from sqlalchemy import Column, Float, Integer, String, Text, create_engine
+from sqlalchemy import Column, Float, Integer, String, Text, text, create_engine
 from sqlalchemy.orm import Session, declarative_base, sessionmaker
 
 import config
@@ -25,6 +25,8 @@ class Invoice(Base):
     payment_status = Column(String(32), nullable=False, default="unpaid")
     payment_proof_path = Column(String(512), nullable=True)
     payment_date = Column(String(32), nullable=True)
+    credit = Column(Float, nullable=False, default=0.00)
+    paid_amount = Column(Float, nullable=False, default=0.00)
 
 
 def _determine_backend() -> str:
@@ -52,7 +54,50 @@ class SQLiteBackend:
             expire_on_commit=False,
             future=True,
         )
+        
         Base.metadata.create_all(self.engine)
+        
+        # 自动迁移: 检测并添加缺失字段
+        self._auto_migrate_sqlite()
+    
+    def _auto_migrate_sqlite(self):
+        """SQLite 自动迁移:检测并添加缺失字段"""
+        try:
+            with self.engine.connect() as conn:
+                # 查询现有字段
+                result = conn.execute(text("PRAGMA table_info(invoices)"))
+                existing_columns = {row[1] for row in result.fetchall()}
+                
+                # 定义期望字段
+                required_fields = {
+                    'credit': 'REAL DEFAULT 0.00 NOT NULL',
+                    'paid_amount': 'REAL DEFAULT 0.00 NOT NULL'
+                }
+                
+                # 添加缺失字段
+                for field_name, field_def in required_fields.items():
+                    if field_name not in existing_columns:
+                        print(f"SQLite Auto-migration: Adding column '{field_name}'")
+                        conn.execute(text(f"ALTER TABLE invoices ADD COLUMN {field_name} {field_def}"))
+                        conn.commit()
+                        
+                        # 为现有数据设置默认值
+                        if field_name == 'paid_amount':
+                            # 已付款的发票,设置 paid_amount = total_amount
+                            conn.execute(text("""
+                                UPDATE invoices 
+                                SET paid_amount = total_amount 
+                                WHERE payment_status = 'paid' AND (paid_amount = 0 OR paid_amount IS NULL)
+                            """))
+                            conn.commit()
+                            print(f"SQLite Auto-migration: Set paid_amount for existing paid invoices")
+                        elif field_name == 'credit':
+                            # 所有现有记录的 credit 设为 0.00
+                            conn.execute(text("UPDATE invoices SET credit = 0.00 WHERE credit IS NULL"))
+                            conn.commit()
+                            print(f"SQLite Auto-migration: Set credit default value")
+        except Exception as e:
+            print(f"SQLite Auto-migration warning: {e}")
 
     @contextmanager
     def session(self) -> Iterable[Session]:
@@ -141,6 +186,8 @@ class SQLiteBackend:
             "payment_status": invoice.payment_status,
             "payment_proof_path": invoice.payment_proof_path,
             "payment_date": invoice.payment_date,
+            "credit": invoice.credit,
+            "paid_amount": invoice.paid_amount,
         }
 
 
@@ -233,6 +280,8 @@ class SupabaseBackend:
             payment_status text default 'unpaid' not null,
             payment_proof_path text,
             payment_date text,
+            credit numeric default 0.00 not null,
+            paid_amount numeric default 0.00 not null,
             inserted_at timestamp with time zone default now()
         );
         """
@@ -293,8 +342,59 @@ class SupabaseBackend:
                 conn.execute(ddl)
                 conn.execute(enable_rls)
                 conn.execute(ensure_policies)
+                
+                # 自动迁移: 检测并添加缺失字段
+                self._auto_migrate_fields(conn)
+                
+                conn.commit()
         except Exception:
             return
+    
+    def _auto_migrate_fields(self, conn) -> None:
+        """自动检测并添加缺失的字段"""
+        try:
+            # 1. 查询现有字段
+            cursor = conn.execute("""
+                SELECT column_name 
+                FROM information_schema.columns 
+                WHERE table_name = 'invoices' AND table_schema = 'public'
+            """)
+            existing_columns = {row[0] for row in cursor.fetchall()}
+            
+            # 2. 定义期望字段
+            required_fields = {
+                'credit': 'numeric default 0.00 not null',
+                'paid_amount': 'numeric default 0.00 not null'
+            }
+            
+            # 3. 添加缺失字段
+            for field_name, field_def in required_fields.items():
+                if field_name not in existing_columns:
+                    print(f"Auto-migration: Adding column '{field_name}'")
+                    conn.execute(f"""
+                        ALTER TABLE public.invoices 
+                        ADD COLUMN {field_name} {field_def}
+                    """)
+                    
+                    # 4. 为现有数据设置默认值
+                    if field_name == 'paid_amount':
+                        # 已付款的发票,设置 paid_amount = total_amount
+                        conn.execute("""
+                            UPDATE public.invoices 
+                            SET paid_amount = total_amount 
+                            WHERE payment_status = 'paid' AND (paid_amount = 0 OR paid_amount IS NULL)
+                        """)
+                        print(f"Auto-migration: Set paid_amount for existing paid invoices")
+                    elif field_name == 'credit':
+                        # 所有现有记录的 credit 设为 0.00
+                        conn.execute("""
+                            UPDATE public.invoices 
+                            SET credit = 0.00 
+                            WHERE credit IS NULL
+                        """)
+                        print(f"Auto-migration: Set credit default value for existing invoices")
+        except Exception as e:
+            print(f"Auto-migration warning: {e}")
 
 
 # ---------- Backend Dispatch ----------

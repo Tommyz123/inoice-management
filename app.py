@@ -53,6 +53,34 @@ def get_mime_type(filename: str) -> str:
     return mime_types.get(ext, "application/octet-stream")
 
 
+# ========== 辅助函数 ==========
+def calculate_payment_status(total_amount: float, paid_amount: float) -> str:
+    """根据 total_amount 和 paid_amount 计算付款状态"""
+    if paid_amount == 0:
+        return "unpaid"
+    elif paid_amount >= total_amount:
+        return "paid"
+    else:
+        return "partial"
+
+def calculate_remaining_amount(total_amount: float, paid_amount: float, credit: float = 0.0) -> float:
+    """计算剩余应付金额 = total_amount - paid_amount - credit"""
+    return max(0.0, total_amount - paid_amount - credit)
+
+def get_payment_status_badge(status: str) -> str:
+    """返回付款状态的 Bootstrap 徽章 HTML"""
+    badge_map = {
+        "unpaid": '<span class="badge bg-danger">Unpaid</span>',
+        "partial": '<span class="badge bg-warning text-dark">Partial</span>',
+        "paid": '<span class="badge bg-success">Paid</span>'
+    }
+    return badge_map.get(status, '<span class="badge bg-secondary">Unknown</span>')
+
+# 注册为 Jinja2 过滤器
+app.jinja_env.filters['payment_status_badge'] = get_payment_status_badge
+app.jinja_env.filters['calculate_remaining'] = calculate_remaining_amount
+
+
 def format_date_english(date_string):
     """Format date string to English format (e.g., 'November 5, 2025')."""
     if not date_string:
@@ -226,6 +254,8 @@ def upload():
         total_amount_raw = request.form.get('totalAmount')
         entered_by = request.form.get('enteredBy')
         notes = request.form.get('notes')
+        credit_raw = request.form.get('credit', '0.00')
+        credit_raw = request.form.get('credit', '0.00')
         file = request.files.get('invoiceFile')
 
         missing_fields = [
@@ -243,8 +273,9 @@ def upload():
 
         try:
             total_amount = float(total_amount_raw.replace(',', ''))
+            credit = float(credit_raw.replace(',', '')) if credit_raw else 0.00
         except (TypeError, ValueError):
-            flash("Total Amount must be a number (example: 1234.56).", 'danger')
+            flash("Total Amount and Credit must be numbers (example: 1234.56).", 'danger')
             return redirect(url_for('upload'))
 
         stored_filename = None
@@ -285,6 +316,8 @@ def upload():
             "entered_by": entered_by,
             "notes": notes,
             "pdf_path": stored_filename,
+            "credit": credit,
+            "paid_amount": 0.00,
         }
 
         try:
@@ -355,6 +388,7 @@ def edit_invoice(invoice_id: int):
         total_amount_raw = request.form.get('totalAmount')
         entered_by = request.form.get('enteredBy')
         notes = request.form.get('notes')
+        credit_raw = request.form.get('credit', '0.00')
 
         missing_fields = [
             label for key, label in (
@@ -371,6 +405,7 @@ def edit_invoice(invoice_id: int):
 
         try:
             total_amount = float(total_amount_raw.replace(',', ''))
+            credit = float(credit_raw.replace(',', '')) if credit_raw else 0.00
         except (TypeError, ValueError):
             flash("Total Amount must be a number (example: 1234.56).", 'danger')
             return redirect(url_for('edit_invoice', invoice_id=invoice_id))
@@ -382,6 +417,7 @@ def edit_invoice(invoice_id: int):
             "total_amount": total_amount,
             "entered_by": entered_by,
             "notes": notes,
+            "credit": credit,
         }
 
         try:
@@ -454,70 +490,128 @@ def stats():
 
 @app.route('/upload_payment/<int:invoice_id>', methods=['POST'])
 def upload_payment_proof(invoice_id: int):
-    """Upload payment proof PDF for an invoice and mark it as paid."""
-    payment_date = request.form.get('paymentDate')
-    payment_file = request.files.get('paymentFile')
-
-    if not payment_date:
-        flash("Payment date is required.", 'danger')
+    """上传付款凭证并记录实付金额(支持部分付款)或更新 Credit"""
+    # 1. 获取发票信息
+    invoices = database.get_invoices()
+    invoice = next((inv for inv in invoices if inv['id'] == invoice_id), None)
+    if not invoice:
+        flash("Invoice not found.", 'danger')
+        return redirect(url_for('index'))
+    
+    # 2. 接收表单数据
+    paid_amount_raw = request.form.get('paidAmount', '').strip()
+    payment_date = request.form.get('paymentDate', '').strip()
+    credit_raw = request.form.get('credit', '').strip()
+    
+    # 3. 判断是更新 Credit 还是记录付款
+    has_payment = bool(paid_amount_raw)
+    has_credit_update = bool(credit_raw)
+    
+    if not has_payment and not has_credit_update:
+        flash("Please enter either a payment amount or update the credit.", 'warning')
         return redirect(url_for('edit_invoice', invoice_id=invoice_id))
-
-    # Upload payment proof file (optional)
-    stored_filename = None
-
-    # Only process file if one was uploaded
-    if payment_file and payment_file.filename:
-        if not allowed_file(payment_file.filename):
-            flash("Supported file types for payment proof: PDF, JPEG, PNG, TIFF", 'danger')
-            return redirect(url_for('edit_invoice', invoice_id=invoice_id))
-
+    
+    update_data = {}
+    
+    # 4. 处理 Credit 更新
+    if has_credit_update:
         try:
-            if storage_handler.should_use_storage():
-                # Upload to Supabase Storage
-                file_data = payment_file.read()
-                filename = secure_filename(payment_file.filename)
-                # Add prefix to distinguish payment proofs from invoices
-                payment_filename = f"payment_{filename}"
-                storage_path, error = storage_handler.upload_file(file_data, payment_filename)
-
-                if error:
-                    flash(f"Failed to upload payment proof to cloud storage: {error}", 'danger')
-                    return redirect(url_for('edit_invoice', invoice_id=invoice_id))
-
-                stored_filename = storage_path
-            else:
-                # Fallback to local storage
-                timestamp = datetime.utcnow().strftime("%Y%m%d%H%M%S")
-                filename = secure_filename(payment_file.filename)
-                stored_filename = f"payment_{timestamp}_{filename}"
-                file_path = os.path.join(app.config["UPLOAD_FOLDER"], stored_filename)
-                payment_file.save(file_path)
-        except Exception as exc:
-            flash(f"Error uploading payment proof: {exc}", 'danger')
+            credit = float(credit_raw.replace(',', ''))
+            update_data['credit'] = credit
+        except (TypeError, ValueError):
+            flash("Credit must be a valid number.", 'danger')
             return redirect(url_for('edit_invoice', invoice_id=invoice_id))
-
-    # Update invoice with payment information
+    
+    # 5. 处理付款
+    if has_payment:
+        if not payment_date:
+            flash("Payment date is required when recording a payment.", 'danger')
+            return redirect(url_for('edit_invoice', invoice_id=invoice_id))
+        
+        try:
+            new_payment = float(paid_amount_raw.replace(',', ''))
+            if new_payment <= 0:
+                flash("Paid amount must be greater than 0.", 'danger')
+                return redirect(url_for('edit_invoice', invoice_id=invoice_id))
+        except (TypeError, ValueError):
+            flash("Paid amount must be a valid number.", 'danger')
+            return redirect(url_for('edit_invoice', invoice_id=invoice_id))
+        
+        # 累加已付金额
+        current_paid = invoice.get('paid_amount', 0.00)
+        total_paid = current_paid + new_payment
+        total_amount = invoice.get('total_amount', 0.00)
+        
+        # 防止超额支付
+        if total_paid > total_amount:
+            flash(f"Total paid amount (${total_paid:.2f}) cannot exceed total amount (${total_amount:.2f}).", 'danger')
+            return redirect(url_for('edit_invoice', invoice_id=invoice_id))
+        
+        # 处理付款凭证文件上传(可选)
+        payment_file = request.files.get('paymentProof')
+        stored_filename = invoice.get('payment_proof_path')
+        
+        if payment_file and payment_file.filename:
+            if not allowed_file(payment_file.filename):
+                flash("Supported file types for payment proof: PDF, JPEG, PNG, TIFF", 'danger')
+                return redirect(url_for('edit_invoice', invoice_id=invoice_id))
+            
+            try:
+                if storage_handler.should_use_storage():
+                    file_data = payment_file.read()
+                    filename = secure_filename(payment_file.filename)
+                    payment_filename = f"payment_{filename}"
+                    storage_path, error = storage_handler.upload_file(file_data, payment_filename)
+                    
+                    if error:
+                        flash(f"Failed to upload payment proof: {error}", 'danger')
+                        return redirect(url_for('edit_invoice', invoice_id=invoice_id))
+                    
+                    stored_filename = storage_path
+                else:
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = secure_filename(payment_file.filename)
+                    stored_filename = f"payment_{timestamp}_{filename}"
+                    file_path = os.path.join(app.config["UPLOAD_FOLDER"], stored_filename)
+                    payment_file.save(file_path)
+            except Exception as exc:
+                flash(f"Error uploading payment proof: {exc}", 'danger')
+                return redirect(url_for('edit_invoice', invoice_id=invoice_id))
+        
+        # 自动计算付款状态
+        new_status = calculate_payment_status(total_amount, total_paid)
+        
+        # 添加付款相关更新
+        update_data.update({
+            'paid_amount': total_paid,
+            'payment_status': new_status,
+            'payment_date': payment_date,
+        })
+        if stored_filename:
+            update_data['payment_proof_path'] = stored_filename
+    
+    # 6. 更新数据库
     try:
-        update_data = {
-            "payment_status": "paid",
-            "payment_proof_path": stored_filename,
-            "payment_date": payment_date,
-        }
-
         result = database.update_invoice(invoice_id, update_data)
         if result:
-            if stored_filename:
-                flash("Payment proof uploaded successfully. Invoice marked as paid.", 'success')
-            else:
-                flash("Invoice marked as paid.", 'success')
+            messages = []
+            if has_credit_update:
+                messages.append(f"Credit updated: ${update_data.get('credit', 0):.2f}")
+            if has_payment:
+                status_text = {
+                    'unpaid': 'Unpaid',
+                    'partial': 'Partial',
+                    'paid': 'Paid'
+                }.get(update_data.get('payment_status', ''), '')
+                messages.append(f"Payment recorded: ${update_data['paid_amount']:.2f}, Status: {status_text}")
+            
+            flash(" | ".join(messages), 'success')
         else:
             flash("Invoice not found.", 'danger')
-
     except Exception as exc:
         flash(f"Error updating invoice: {exc}", 'danger')
-
+    
     return redirect(url_for('edit_invoice', invoice_id=invoice_id))
-
 @app.route('/payment_files/<path:filename>')
 def download_payment_proof(filename: str):
     """Serves payment proof PDFs or redirects to Supabase Storage URL."""
